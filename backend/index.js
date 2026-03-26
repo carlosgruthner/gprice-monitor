@@ -2,25 +2,25 @@ const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
 const puppeteer = require('puppeteer');
-const {Resend} = require('resend');
+const { Resend } = require('resend');
 const cron = require('node-cron');
 require('dotenv').config();
 
 const app = express();
 const PORT = 4000;
 
-// ==================== MIDDLEWARES (OBRIGATÓRIO NA ORDEM CERTA) ====================
+// ==================== MIDDLEWARES ====================
 app.use(cors({
-  origin: 'http://localhost:3000', // Troque pelo endereço do seu frontend Next.js
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // Adicionado PATCH
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json({ limit: '10mb' }));   // ← Isso resolve o body undefined
+app.use(express.json({ limit: '10mb' }));
 
 const db = new Database('precos.db');
 
-// Atualize seu bloco de inicialização do banco:
+// CORREÇÃO 1: Removida a vírgula após 'status TEXT DEFAULT 'ativo''
 db.exec(`
   CREATE TABLE IF NOT EXISTS produtos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +28,10 @@ db.exec(`
     loja TEXT,
     url TEXT NOT NULL UNIQUE,
     ultimo_preco REAL,
-    ultima_verificacao TEXT DEFAULT CURRENT_TIMESTAMP
+    ultima_verificacao TEXT DEFAULT CURRENT_TIMESTAMP,
+    intervalo_minutos INTEGER DEFAULT 30, 
+    proxima_verificacao TEXT DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'ativo'
   );
 
   CREATE TABLE IF NOT EXISTS historico_precos (
@@ -40,271 +43,231 @@ db.exec(`
   );
 `);
 
-console.log('✅ Banco de Dados e Histórico OK');
-console.log('✅ Tabela SQLite OK');
+console.log('✅ Banco de Dados OK');
 
-// ==================== EMAIL ====================
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ==================== SCRAPE ====================
 async function pegarPreco(url) {
-  let browser;
-  try {
-    // Usar 'new' no headless costuma ser melhor detectado nas versões mais recentes do Puppeteer
-    browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-    const page = await browser.newPage();
+    let browser;
+    try {
+        browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // 1. Disfarça o robô simulando um navegador Chrome real no Windows
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        const preco = await page.evaluate(() => {
+            const selectors = [
+                '.ui-pdp-price__second-line .andes-money-amount__fraction',
+                '.andes-money-amount__fraction',
+                'span.a-price-whole',
+                'span[data-testid="price"]',
+                '.price__value'
+            ];
+            for (let s of selectors) {
+                const el = document.querySelector(s);
+                if (el && el.textContent) {
+                    let textoLimpo = el.textContent.replace(/[^\d,]/g, '').replace(',', '.');
+                    const valorFinal = parseFloat(textoLimpo);
+                    if (!isNaN(valorFinal)) return valorFinal;
+                }
+            }
+            return null;
+        });
 
-    // 2. Entra na página
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-    // 3. Dá um tempinho extra (2 segundos) para o Javascript do site carregar o preço na tela
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const preco = await page.evaluate(() => {
-      // Adicionei seletores mais específicos do Mercado Livre e Amazon
-      const selectors = [
-        '.ui-pdp-price__second-line .andes-money-amount__fraction', // ML principal
-        '.andes-money-amount__fraction', // ML genérico
-        'span.a-price-whole',            // Amazon
-        'span[data-testid="price"]', 
-        'span.aok-offscreen', 
-        '[data-testid="price-value"]', 
-        '.price__value'
-      ];
-
-      for (let s of selectors) {
-        const el = document.querySelector(s);
-        if (el && el.textContent) {
-          // Pega o texto original, ex: "R$ 1.500,99" ou "1.500"
-          let textoBruto = el.textContent;
-          
-          // Remove TUDO que não for número ou vírgula (tira o R$ e os pontos de milhar)
-          // "R$ 1.500,99" vira "1500,99"
-          let textoLimpo = textoBruto.replace(/[^\d,]/g, '');
-          
-          // Troca a vírgula por ponto para o JavaScript entender os centavos
-          // "1500,99" vira "1500.99"
-          textoLimpo = textoLimpo.replace(',', '.');
-          
-          // Converte para float
-          const valorFinal = parseFloat(textoLimpo);
-          // Evita retornar NaN se a conversão falhar
-          if (!isNaN(valorFinal)) return valorFinal;
-        }
-      }
-      return null;
-    });
-
-    await browser.close();
-    return preco;
-  } catch (e) {
-    console.error('❌ Puppeteer:', e.message);
-    if (browser) await browser.close();
-    return null;
-  }
-}
-
-// Substitua a função extrairLoja antiga por esta:
-function extrairLoja(url) {
-  if (!url) return "Loja";
-  try {
-    const obj = new URL(url);
-    let nome = obj.hostname.replace('www.', '').split('.')[0];
-    return nome.charAt(0).toUpperCase() + nome.slice(1);
-  } catch (e) {
-    return "Loja";
-  }
-}
-// ==================== FUNÇÃO ENVIAR EMAIL (RESEND) ====================
-async function enviarEmail(nome, antigo, novo, url) {
-  try {
-    const { data, error } = await resend.emails.send({
-      from: `Monitor <${process.env.EMAIL_FROM}>`, // No plano grátis, use esse remetente padrão
-      to: `Carlos <${process.env.EMAIL_TO}>`, // O e-mail que vai receber o alerta
-      subject: `🔥 ${nome} BAIXOU!`,
-      html: `
-        <div style="font-family: sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-          <h2 style="color: #10b981;">📉O preço caiu! 💰</h2>
-          <p>O produto <strong>${nome}</strong> que você está monitorando baixou de preço.</p>
-          <p style="font-size: 18px;">
-            De: <span style="text-decoration: line-through; color: #999;">R$ ${antigo || '?'}</span><br>
-            Por: <strong style="color: #10b981; font-size: 24px;">R$ ${novo}</strong>
-          </p>
-          <a href="${url}" style="background: #10b981; color: white; padding: 10px 20px; text-decoration: none; border-radius: 10px; display: inline-block; margin: 10px; font-size: 25px;">
-            <span style="font-size: 20px;">🛍 Ver Produto na Loja</span>
-          </a>
-        </div>
-      `,
-    });
-
-    if (error) {
-      return console.error('❌ Erro Resend:', error);
+        await browser.close();
+        return preco;
+    } catch (e) {
+        console.error('❌ Puppeteer:', e.message);
+        if (browser) await browser.close();
+        return null;
     }
-
-    console.log('📧 E-mail enviado com sucesso via Resend!', data.id);
-  } catch (err) {
-    console.error('❌ Erro inesperado ao enviar e-mail:', err);
-  }
 }
 
-// ==================== MONITOR 10 MIN ====================
-const intervalo = 10; // minutos
-cron.schedule(`*/${intervalo} * * * *`, checarTodos);
+function extrairLoja(url) {
+    if (!url) return "Loja";
+    try {
+        const obj = new URL(url);
+        let nome = obj.hostname.replace('www.', '').split('.')[0];
+        return nome.charAt(0).toUpperCase() + nome.slice(1);
+    } catch (e) { return "Loja"; }
+}
+
+async function enviarEmail(nome, antigo, novo, url) {
+    const precoAntigo = parseFloat(antigo).toFixed(2);
+    const precoNovo = parseFloat(novo).toFixed(2);
+    const economia = (parseFloat(antigo) - parseFloat(novo)).toFixed(2);
+
+    try {
+        await resend.emails.send({
+            from: `GPrice Monitor <${process.env.EMAIL_FROM}>`,
+            to: process.env.EMAIL_TO,
+            subject: `🔥 BAIXOU! ${nome} agora por R$ ${precoNovo}`,
+            html: `
+            <div style="font-family: sans-serif; background-color: #09090b; color: #ffffff; padding: 40px 20px; text-align: center;">
+                <div style="max-width: 500px; margin: 0 auto; background-color: #000000; border: 1px solid #22c55e; border-radius: 24px; padding: 30px;">
+                    
+                    <h1 style="color: #22c55e; font-size: 24px; margin-bottom: 10px;">🔥 O PREÇO CAIU!</h1>
+                    <p style="color: #a1a1aa; font-size: 16px;">O produto que você está monitorando acaba de baixar de preço.</p>
+                    
+                    <hr style="border: 0; border-top: 1px solid #27272a; margin: 25px 0;">
+                    
+                    <h2 style="font-size: 20px; color: #ffffff; margin-bottom: 20px;">${nome}</h2>
+                    
+                    <div style="display: inline-block; margin-bottom: 25px;">
+                        <span style="color: #71717a; text-decoration: line-through; font-size: 18px;">R$ ${precoAntigo}</span>
+                        <div style="color: #4ade80; font-size: 36px; font-weight: bold; margin-top: 5px;">R$ ${precoNovo}</div>
+                        <div style="display: inline-block; background-color: #064e3b; color: #4ade80; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: bold; margin-top: 10px;">
+                            ECONOMIA DE R$ ${economia}
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <a href="${url}" >
+                            <span style="background-color: #22c55e; color: #ffffff; text-decoration: none; padding: 15px 30px; border-radius: 12px; font-weight: bold; font-size: 16px; display: inline-block;">VER NA LOJA AGORA</span>
+                        </a>
+                    </div>
+
+                    <p style="color: #52525b; font-size: 12px; margin-top: 30px;">
+                        Este é um aviso automático do seu Monitor de Preços.
+                    </p>
+                </div>
+            </div>
+            `
+        });
+        console.log('📧 E-mail de alerta enviado com sucesso!');
+    } catch (err) { 
+        console.error('❌ Erro ao enviar E-mail:', err); 
+    }
+}
+
+// ==================== MONITOR (LÓGICA CORRIGIDA) ====================
+cron.schedule(`* * * * *`, checarTodos);
+
 async function checarTodos() {
-  console.log(`🔄 Verificando (${intervalo}min)...`);
-  // await enviarEmail('Teste de Email', 100, 50, 'https://www.mercadolivre.com.br/');
-  const produtos = db.prepare('SELECT * FROM produtos').all();
-  for (const p of produtos) {
-    const novo = await pegarPreco(p.url);
-    if (!novo) continue;
-    const antigo = p.ultimo_preco || novo;
-    // 1. Atualiza o estado atual do produto
-  db.prepare('UPDATE produtos SET ultimo_preco = ?, ultima_verificacao = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(novo, p.id);
+    const agora = new Date().toISOString();
+    // O correto é 'ativo' entre aspas simples, pois é um valor de texto (String)
+    
+    const fila = db.prepare("SELECT * FROM produtos WHERE proxima_verificacao <= ? AND status = 'ativo'").all(agora);
+    
+    if (fila.length > 0) console.log(`🔄 Processando ${fila.length} produtos da fila...`);
 
-  // 2. SALVA NO HISTÓRICO (Mesmo que o preço não tenha mudado, para gerar o gráfico de linha contínua)
-  db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(p.id, novo);
+    for (const p of fila) {
+        const antigo = p.ultimo_preco;
+        const novo = await pegarPreco(p.url);
 
-  if (novo < antigo) await enviarEmail(p.nome, antigo, novo, p.url);
-  }
+        if (novo !== null) {
+            const dataProxima = new Date();
+            // CORREÇÃO 2: Usar o nome correto da coluna (intervalo_minutos)
+            dataProxima.setMinutes(dataProxima.getMinutes() + (p.intervalo_minutos || 30));
+
+            db.prepare(`
+                UPDATE produtos SET 
+                    ultimo_preco = ?, 
+                    ultima_verificacao = CURRENT_TIMESTAMP,
+                    proxima_verificacao = ?
+                WHERE id = ?
+            `).run(novo, dataProxima.toISOString(), p.id);
+
+            // CORREÇÃO 3: Inserir no histórico com o valor capturado
+            db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(p.id, novo);
+
+            if (antigo && novo < antigo) {
+                await enviarEmail(p.nome, antigo, novo, p.url);
+            }
+        }
+    }
 }
 
+// Rota para forçar atualização de todos os produtos agora
+app.post('/atualizar', async (req, res) => {
+    try {
+        console.log("🔄 Iniciando atualização manual de todos os produtos...");
+        
+        // 1. Pega a função que você já usa no Cron (ex: checarTodos)
+        // Se a função estiver definida no escopo, chame-a aqui:
+        await checarTodos(); 
+        // enviarEmail("Teste Produto", 100, 50, "https://exemplo.com"); // Teste de envio de email
 
+        res.json({ message: "Atualização concluída com sucesso!" });
+    } catch (error) {
+        console.error("Erro na atualização manual:", error);
+        res.status(500).json({ error: "Erro ao atualizar produtos" });
+    }
+});
 
-// ==================== ROTAS COM SEGURANÇA ====================
-app.get('/', (req, res) => res.json({ status: '✅ Backend 100% OK' }));
+// Atualizar intervalo de um produto específico
+app.patch('/produtos/:id/intervalo', (req, res) => {
+    const { id } = req.params;
+    const { intervalo } = req.body;
+    
+    // Ao mudar o intervalo, já recalculamos a próxima verificação para agora + novo intervalo
+    const novaProxima = new Date();
+    novaProxima.setMinutes(novaProxima.getMinutes() + parseInt(intervalo));
+
+    db.prepare(`
+        UPDATE produtos 
+        SET intervalo_minutos = ?, proxima_verificacao = ? 
+        WHERE id = ?
+    `).run(intervalo, novaProxima.toISOString(), id);
+
+    res.json({ success: true });
+});
+
+// Atualizar intervalo de TODOS os produtos
+app.patch('/produtos/intervalo/todos', (req, res) => {
+    const { intervalo } = req.body;
+    const novaProxima = new Date();
+    novaProxima.setMinutes(novaProxima.getMinutes() + parseInt(intervalo));
+
+    db.prepare(`
+        UPDATE produtos 
+        SET intervalo_minutos = ?, proxima_verificacao = ?
+    `).run(intervalo, novaProxima.toISOString());
+
+    res.json({ success: true });
+});
+
+// ==================== ROTAS ====================
 
 app.get('/produtos', (req, res) => {
-  const lista = db.prepare(`
-    SELECT 
-      p.*, 
-      (SELECT MIN(preco) FROM historico_precos WHERE produto_id = p.id) as menor_preco
-    FROM produtos p 
-    ORDER BY p.id DESC
-  `).all();
-  res.json(lista);
+    const lista = db.prepare(`
+        SELECT p.*, (SELECT MIN(preco) FROM historico_precos WHERE produto_id = p.id) as menor_preco
+        FROM produtos p ORDER BY p.id DESC
+    `).all();
+    res.json(lista);
 });
 
 app.post('/produtos', async (req, res) => {
-  console.log('📥 Body recebido:', req.body);
+    const { nome, url, intervalo_minutos } = req.body;
+    if (!nome || !url) return res.status(400).json({ error: 'Dados obrigatórios' });
 
-  const { nome, url } = req.body || {}; 
-  
-  if (!nome || !url) {
-    return res.status(400).json({ error: 'Nome e URL são obrigatórios' });
-  }
+    const nomeDaLoja = extrairLoja(url);
+    const preco = await pegarPreco(url);
 
-  // 1. Extrai o nome da loja antes de rodar o Puppeteer (rápido)
-  const nomeDaLoja = extrairLoja(url); 
+    // CORREÇÃO 4: Adicionado 'status' e 'intervalo_minutos' no INSERT
+    const info = db.prepare(`
+        INSERT INTO produtos (nome, url, ultimo_preco, loja, intervalo_minutos, status)
+        VALUES (?, ?, ?, ?, ?, 'ativo')
+    `).run(nome, url, preco, nomeDaLoja, intervalo_minutos || 30);
 
-  // 2. Busca o preço (demorado)
-  const preco = await pegarPreco(url);
-
-  // 3. Salva no banco (Adicionada a 4ª interrogação para a 'loja')
-  const info = db.prepare(`
-    INSERT OR REPLACE INTO produtos (nome, url, ultimo_preco, loja)
-    VALUES (?, ?, ?, ?)
-  `).run(nome, url, preco, nomeDaLoja);
-
-  // 4. Salva no histórico
-  const idProduto = info.lastInsertRowid || db.prepare('SELECT id FROM produtos WHERE url = ?').get(url).id;
-
-  if (preco) {
-    db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(idProduto, preco);
-  }
-
-  res.json({ success: true, preco_encontrado: preco, loja: nomeDaLoja });
-  console.log(`✅ Produto "${nome}" da loja "${nomeDaLoja}" adicionado.`);
+    if (preco) {
+        db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(info.lastInsertRowid, preco);
+    }
+    res.json({ success: true, preco, loja: nomeDaLoja });
 });
 
-// Retorna o histórico de um produto específico
-app.get('/produtos/:id/historico', (req, res) => {
-  const { id } = req.params;
-  const historico = db.prepare(`
-    SELECT preco, data_hora 
-    FROM historico_precos 
-    WHERE produto_id = ? 
-    ORDER BY data_hora ASC
-  `).all(id);
-  
-  res.json(historico);
+app.patch('/produtos/:id/status', (req, res) => {
+    const { id } = req.params;
+    const { novoStatus } = req.body;
+    db.prepare('UPDATE produtos SET status = ? WHERE id = ?').run(novoStatus, id);
+    res.json({ success: true });
 });
-// ==================== EXCLUIR PRODUTO ====================
+
 app.delete('/produtos/:id', (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const info = db.prepare('DELETE FROM produtos WHERE id = ?').run(id);
-    
-    // info.changes retorna quantas linhas foram afetadas. Se for 0, o ID não existia.
-    if (info.changes === 0) {
-      return res.status(404).json({ error: 'Produto não encontrado.' });
-    }
-
-    console.log(`🗑️ Produto ID ${id} excluído com sucesso.`);
-    res.json({ success: true, message: 'Produto excluído com sucesso.' });
-  } catch (error) {
-    console.error('❌ Erro ao excluir:', error.message);
-    res.status(500).json({ error: 'Erro interno ao excluir o produto.' });
-  }
-});
-// ==================== EDITAR PRODUTO ====================
-app.put('/produtos/:id', async (req, res) => {
-  const { id } = req.params;
-  const { nome, url } = req.body || {};
-
-  if (!nome || !url) {
-    return res.status(400).json({ error: 'Nome e URL são obrigatórios para atualizar.' });
-  }
-
-  try {
-    // 1. Verifica se o produto existe e pega a URL antiga
-    const produtoAntigo = db.prepare('SELECT * FROM produtos WHERE id = ?').get(id);
-    
-    if (!produtoAntigo) {
-      return res.status(404).json({ error: 'Produto não encontrado.' });
-    }
-
-    // 2. Se a URL mudou, precisamos raspar o preço do novo link
-    let preco = produtoAntigo.ultimo_preco;
-    if (produtoAntigo.url !== url) {
-      console.log(`🔄 URL alterada. Buscando preço no novo link: ${url}`);
-      preco = await pegarPreco(url);
-    }
-
-    // 3. Atualiza no banco de dados
-    db.prepare(`
-      UPDATE produtos 
-      SET nome = ?, url = ?, ultimo_preco = ?, ultima_verificacao = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(nome, url, preco, id);
-
-    console.log(`✏️ Produto ID ${id} atualizado. Novo nome: "${nome}"`);
-    res.json({ 
-      success: true, 
-      message: 'Produto atualizado com sucesso.',
-      preco_atualizado: preco 
-    });
-
-  } catch (error) {
-    // Caso tente colocar uma URL que já existe em outro produto (devido ao UNIQUE no banco)
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      return res.status(400).json({ error: 'Esta URL já está cadastrada em outro produto.' });
-    }
-    console.error('❌ Erro ao atualizar:', error.message);
-    res.status(500).json({ error: 'Erro interno ao atualizar o produto.' });
-  }
+    db.prepare('DELETE FROM produtos WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
 });
 
-app.post('/atualizar', async (req, res) => {
-  await checarTodos();
-  res.json({ message: '✅ Atualização manual OK' });
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Backend rodando em http://localhost:${PORT}`);
-  console.log(`✅ Teste: abra http://localhost:4000/ no navegador`);
-});
+app.listen(PORT, () => console.log(`🚀 Server em http://localhost:${PORT}`));
