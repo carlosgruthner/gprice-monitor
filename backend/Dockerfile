@@ -1,22 +1,27 @@
-# Usa uma versão leve do Node
 FROM node:18-alpine
 
-# Instala dependências necessárias para o Puppeteer e SQLite no Alpine
+# Adicionamos build-base, python3 e g++ para o npm conseguir compilar módulos nativos
 RUN apk add --no-cache \
       chromium \
       nss \
       freetype \
       harfbuzz \
       ca-certificates \
-      ttf-freefont
+      ttf-freefont \
+      build-base \
+      python3 \
+      make \
+      g++
 
-# Define que o Puppeteer deve usar o Chromium instalado no sistema
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 
+# Dica: use o cache do Docker a seu favor
 COPY package*.json ./
+
+# Se o erro persistir, use 'npm install --quiet' para ver o log limpo
 RUN npm install
 
 COPY . .
