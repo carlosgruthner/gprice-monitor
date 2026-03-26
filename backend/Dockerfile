@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Adicionamos build-base, python3 e g++ para o npm conseguir compilar módulos nativos
 RUN apk add --no-cache \
