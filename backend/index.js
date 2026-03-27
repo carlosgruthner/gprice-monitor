@@ -256,6 +256,7 @@ app.post('/produtos', async (req, res) => {
 
     if (preco) {
         db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(info.lastInsertRowid, preco);
+        console.log(`✅ Produto adicionado: ${nome} por R$ ${preco} (${nomeDaLoja})`);
     }
     res.json({ success: true, preco, loja: nomeDaLoja });
 });

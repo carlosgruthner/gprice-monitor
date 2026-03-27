@@ -3,6 +3,7 @@ name: Docker Build and Push
 on:
   push:
     branches: [ "main" ] # Roda sempre que houver push na main
+    tags: ["v*"] # Agora ele também roda quando você cria uma tag v1.0
 
 jobs:
   build:
@@ -27,11 +28,17 @@ jobs:
         with:
           context: ./backend # Ajuste para o nome da sua pasta
           push: true
-          tags: ghcr.io/${{ github.repository }}/backend:latest
+          tags:  |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }} # Se for uma tag, usa o nome dela (ex: v1.2)
 
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend # Ajuste para o nome da sua pasta
           push: true
-          tags: ghcr.io/${{ github.repository }}/frontend:latest
+          tags: |
+            ghcr.io/${{ github.repository }}/frontend:latest
+            ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/frontend:${{ github.ref_name }}

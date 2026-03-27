@@ -257,7 +257,7 @@ export default function Home() {
                 return (
                   <tr
                     key={p.id}
-                    className="block md:table-row border-b border-zinc-900 hover:bg-zinc-900/30 transition-all"
+                    className="block md:table-row border-b border-green-600 hover:bg-green-900/30 transition-all"
                   >
                     {/* Produto */}
                     <td className="block md:table-cell p-4">
