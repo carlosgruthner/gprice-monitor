@@ -9,9 +9,11 @@ require('dotenv').config();
 const app = express();
 const PORT = 4000;
 
+const allowedOrigin = process.env.FRONTEND_URL || '*';
+
 // ==================== MIDDLEWARES ====================
 app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: allowedOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // Adicionado PATCH
     allowedHeaders: ['Content-Type', 'Authorization']
 }));

@@ -1,22 +1,24 @@
-version: '3.8'
 
 services:
   backend:
-    build: ./backend
+    # build: ./backend
+    image: ghcr.io/carlosgruthner/gprice-monitor/backend:latest
     ports:
       - "4000:4000"
     volumes:
-      - ./backend/precos.db:/app/precos.db
+      - ./backend:/app/data
     environment:
+      - DTABASE_PATH=/app/data/precos.db
       - RESEND_API_KEY=${RESEND_API_KEY}
       - EMAIL_FROM=${EMAIL_FROM}
       - EMAIL_TO=${EMAIL_TO}
     restart: always
 
   frontend:
-    build: ./frontend
+    # build: ./frontend
+    image: ghcr.io/carlosgruthner/gprice-monitor/frontend:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       - backend
     environment:
