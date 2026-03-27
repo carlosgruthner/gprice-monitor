@@ -96,9 +96,10 @@ function extrairLoja(url) {
     } catch (e) { return "Loja"; }
 }
 
-async function enviarEmail(nome, antigo, novo, url) {
+async function enviarEmail(nome, antigo, novo, url, menorPreco) {
     const precoAntigo = parseFloat(antigo).toFixed(2);
     const precoNovo = parseFloat(novo).toFixed(2);
+    const menorPrecoPrint = parseFloat(menorPreco).toFixed(2);
     const economia = (parseFloat(antigo) - parseFloat(novo)).toFixed(2);
 
     try {
@@ -123,6 +124,7 @@ async function enviarEmail(nome, antigo, novo, url) {
                         <div style="display: inline-block; background-color: #064e3b; color: #4ade80; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: bold; margin-top: 10px;">
                             ECONOMIA DE R$ ${economia}
                         </div>
+                        <span style="color: #71717a; text-decoration: line-through; font-size: 18px;">Menor Preço Registrado: R$ ${menorPrecoPrint}</span>
                     </div>
 
                     <div style="margin-top: 20px;">
@@ -157,6 +159,7 @@ async function checarTodos() {
 
     for (const p of fila) {
         const antigo = p.ultimo_preco;
+        const menorPreco = db.prepare('SELECT MIN(preco) as menor FROM historico_precos WHERE produto_id = ?').get(p.id)?.menor;
         const novo = await pegarPreco(p.url);
 
         if (novo !== null) {
@@ -176,7 +179,7 @@ async function checarTodos() {
             db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(p.id, novo);
 
             if (antigo && novo < antigo) {
-                await enviarEmail(p.nome, antigo, novo, p.url);
+                await enviarEmail(p.nome, antigo, novo, p.url, precoMaisBaixo);
             }
         }
     }
