@@ -31,7 +31,7 @@ jobs:
           tags:  |
             ghcr.io/${{ github.repository }}/backend:latest
             ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }} # Se for uma tag, usa o nome dela (ex: v1.2)
+            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }}
 
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
