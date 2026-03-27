@@ -47,41 +47,40 @@ cd gprice-monitor
 
 2. Configure as variáveis de ambiente
 
-Crie o arquivo .env dentro da pasta backend/ com o seguinte conteúdo:
+  Crie o arquivo .env dentro da pasta backend/ com o seguinte conteúdo:
 
-RESEND_API_KEY="sua_chave_api_aqui"
-EMAIL_FROM="seu_email_de_envio@exemplo.com"
-EMAIL_TO="email_que_receberá_as_notificacoes@exemplo.com"
+    RESEND_API_KEY="sua_chave_api_aqui"
+    EMAIL_FROM="seu_email_de_envio@exemplo.com"
+    EMAIL_TO="email_que_receberá_as_notificacoes@exemplo.com"
 
 ## Como executar :
 
-## Opção 1: Com Docker (Recomendada)
+  Opção 1: Com Docker (Recomendada)
 
 docker-compose up --build
 
 O frontend estará disponível em http://localhost:3000 (ou na porta configurada no docker-compose.yml).
 
-## Opção 2: Execução Manual
-  Backend:
-
-    cd backend
-    npm install
-    npm start
-  Frontend:
-    cd frontend
-    npm install
-    npm run dev
+  Opção 2: Execução Manual
+    Backend:
+        cd backend
+        npm install
+        npm start
+    Frontend:
+        cd frontend
+        npm install
+        npm run dev
 
 
 ##  Como Usar:
-  Acesse o frontend.
-  Insira o link do produto da loja que deseja monitorar.
-  O sistema irá verificar o preço periodicamente e enviar um e-mail automático caso haja alteração.
+    Acesse o frontend.
+    Insira o link do produto da loja que deseja monitorar.
+    O sistema irá verificar o preço periodicamente e enviar um e-mail automático caso haja alteração.
 
 ## Contribuição
 
-  Contribuições são muito bem-vindas!
-  Sinta-se á vontade para abrir Issues ou Pull Requests.
+    Contribuições são muito bem-vindas!
+    Sinta-se á vontade para abrir Issues ou Pull Requests.
 
 
 
