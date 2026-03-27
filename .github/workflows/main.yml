@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ] # Roda sempre que houver push na main
     tags: ["v*"] # Agora ele também roda quando você cria uma tag v1.0
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 jobs:
   build:
