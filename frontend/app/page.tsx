@@ -6,7 +6,7 @@ import { toast, Toaster } from "react-hot-toast";
 import Link from "next/link";
 import Image from "next/image";
 
-const API = "http://172.0.0.1:4000";
+const API = "http://gpriceapi.lan";
 
 export default function Home() {
   const [produtos, setProdutos] = useState([]);

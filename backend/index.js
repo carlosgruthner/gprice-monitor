@@ -9,7 +9,7 @@ require('dotenv').config();
 const app = express();
 const PORT = 4000;
 
-const allowedOrigin = process.env.FRONTEND_URL || '*';
+const allowedOrigin = '*';
 
 // ==================== MIDDLEWARES ====================
 app.use(cors({
@@ -276,4 +276,4 @@ app.delete('/produtos/:id', (req, res) => {
     res.json({ success: true });
 });
 
-app.listen(PORT, () => console.log(`🚀 Server em http://172.0.0.1:${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server em http://localhost:${PORT}`));
