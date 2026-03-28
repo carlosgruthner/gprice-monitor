@@ -6,7 +6,7 @@ import { toast, Toaster } from "react-hot-toast";
 import Link from "next/link";
 import Image from "next/image";
 
-const API = "http://localhost:4000";
+const API = process.env.NEXT_PUBLIC_API_URL
 
 export default function Home() {
   const [produtos, setProdutos] = useState([]);

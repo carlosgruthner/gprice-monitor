@@ -47,11 +47,12 @@ cd gprice-monitor
 
 2. Configure as variáveis de ambiente
 
-  Crie o arquivo .env dentro da pasta backend/ com o seguinte conteúdo:
+  Crie o arquivo .env com o seguinte conteúdo:
 
     RESEND_API_KEY="sua_chave_api_aqui"
     EMAIL_FROM="seu_email_de_envio@exemplo.com"
     EMAIL_TO="email_que_receberá_as_notificacoes@exemplo.com"
+    API_URL=http:ipdaapi:4000
 
 ## Como executar :
 
