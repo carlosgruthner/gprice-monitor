@@ -1,8 +1,9 @@
 
 services:
-  backend:
+  gpricemonitor-backend:
     # build: ./backend
     image: ghcr.io/carlosgruthner/gprice-monitor/backend:latest
+    container_name: gpricemonitor-backend
     ports:
       - "4000:4000"
     volumes:
@@ -14,9 +15,10 @@ services:
       - EMAIL_TO=${EMAIL_TO}
     restart: always
 
-  frontend:
+  gpricemonitor:
     # build: ./frontend
     image: ghcr.io/carlosgruthner/gprice-monitor/frontend:latest
+    container_name: gpricemonitor
     ports:
       - "3001:3000"
     depends_on:
