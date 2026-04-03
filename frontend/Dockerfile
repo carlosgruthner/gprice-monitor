@@ -12,7 +12,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_API_URL=${API_URL}
 
 # Desativa a telemetria do Next durante o build (opcional, mais rápido)
 ENV NEXT_TELEMETRY_DISABLED 1
