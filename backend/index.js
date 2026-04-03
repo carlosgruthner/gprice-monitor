@@ -4,6 +4,8 @@ const Database = require('better-sqlite3');
 const puppeteer = require('puppeteer');
 const { Resend } = require('resend');
 const cron = require('node-cron');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -20,7 +22,16 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-const db = new Database('precos.db');
+
+
+// Garante que a pasta data exista antes de abrir o banco
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir);
+}
+
+// O banco DEVE estar dentro da pasta /data para o volume do Docker funcionar
+const db = new Database(path.join(dataDir, 'precos.db'));
 
 // CORREÇÃO 1: Removida a vírgula após 'status TEXT DEFAULT 'ativo''
 db.exec(`
