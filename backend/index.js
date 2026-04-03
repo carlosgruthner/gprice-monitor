@@ -276,4 +276,6 @@ app.delete('/produtos/:id', (req, res) => {
     res.json({ success: true });
 });
 
-app.listen(PORT, () => console.log(`🚀 Server em http://localhost:${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server pronto e acessível em todas as interfaces na porta ${PORT}`);
+});
