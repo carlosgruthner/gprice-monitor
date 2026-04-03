@@ -1,6 +1,6 @@
 # ESTÁGIO 1: CONSTRUÇÃO
 FROM node:22-alpine AS builder
-WORKDIR /app
+WORKDIR /app/data
 # Instalamos o que é preciso para compilar o SQLite
 RUN apk add --no-cache build-base python3 make g++
 COPY package*.json ./

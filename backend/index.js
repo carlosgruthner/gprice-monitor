@@ -20,7 +20,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-const db = new Database('./data/precos.db');
+const db = new Database('precos.db');
 
 // CORREÇÃO 1: Removida a vírgula após 'status TEXT DEFAULT 'ativo''
 db.exec(`
