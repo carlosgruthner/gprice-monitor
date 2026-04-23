@@ -1,9 +1,9 @@
 
 services:
-  gpricemonitor-backend:
+  gpricemonitor-api:
     # build: ./backend
     image: ghcr.io/carlosgruthner/gprice-monitor/backend:latest
-    container_name: gpricemonitor-backend
+    container_name: gpricemonitor-api
     ports:
       - "4000:4000"
     volumes:
@@ -24,10 +24,11 @@ services:
     image: ghcr.io/carlosgruthner/gprice-monitor/frontend:latest
     container_name: gpricemonitor
     ports:
-      - "3001:3000"
+      - "3000:3000"
     depends_on:
-      - backend
+      - gpricemonitor-api
     environment:
-      - EXTERNAL_API_IP=192.168.1.50 # Altere aqui quando mudar de local
-      - EXTERNAL_API_PORT=3001
+      - HOSTNAME=0.0.0.0
+      - EXTERNAL_API_IP=172.17.154.235 # Altere o ip da api quando mudar de local
+      - EXTERNAL_API_PORT=4000
     restart: always
