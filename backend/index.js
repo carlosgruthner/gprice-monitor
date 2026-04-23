@@ -41,9 +41,9 @@ db.exec(`
     loja TEXT,
     url TEXT NOT NULL UNIQUE,
     ultimo_preco REAL,
-    ultima_verificacao TEXT DEFAULT CURRENT_TIMESTAMP,
+    ultima_verificacao TEXT DEFAULT (datetime('now', 'localtime')),
+    proxima_verificacao TEXT DEFAULT (datetime('now', 'localtime')),
     intervalo_minutos INTEGER DEFAULT 30, 
-    proxima_verificacao TEXT DEFAULT CURRENT_TIMESTAMP,
     status TEXT DEFAULT 'ativo'
   );
 
@@ -51,7 +51,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     produto_id INTEGER,
     preco REAL,
-    data_hora TEXT DEFAULT CURRENT_TIMESTAMP,
+    data_hora TEXT DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (produto_id) REFERENCES produtos (id) ON DELETE CASCADE
   );
 `);
@@ -169,32 +169,43 @@ async function checarTodos() {
     if (fila.length > 0) console.log(`🔄 Processando ${fila.length} produtos da fila...`);
 
     for (const p of fila) {
-        const antigo = p.ultimo_preco;
-        const menorPreco = db.prepare('SELECT MIN(preco) as menor FROM historico_precos WHERE produto_id = ?').get(p.id)?.menor;
-        const novo = await pegarPreco(p.url);
+    const novo = await pegarPreco(p.url);
+    const dataProxima = new Date();
+    dataProxima.setMinutes(dataProxima.getMinutes() + (p.intervalo_minutos || 30));
 
-        if (novo !== null) {
-            const dataProxima = new Date();
-            // CORREÇÃO 2: Usar o nome correto da coluna (intervalo_minutos)
-            dataProxima.setMinutes(dataProxima.getMinutes() + (p.intervalo_minutos || 30));
+    if (novo !== null) {
+        // Atualiza com sucesso e insere histórico
+        db.prepare(`
+            UPDATE produtos SET 
+                ultimo_preco = ?, 
+                ultima_verificacao = datetime('now', 'localtime'),
+                proxima_verificacao = ?
+            WHERE id = ?
+        `).run(novo, dataProxima.toISOString(), p.id);
 
-            db.prepare(`
-                UPDATE produtos SET 
-                    ultimo_preco = ?, 
-                    ultima_verificacao = CURRENT_TIMESTAMP,
-                    proxima_verificacao = ?
-                WHERE id = ?
-            `).run(novo, dataProxima.toISOString(), p.id);
-
-            // CORREÇÃO 3: Inserir no histórico com o valor capturado
-            db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(p.id, novo);
-
-            if (antigo && novo < antigo) {
-                await enviarEmail(p.nome, antigo, novo, p.url, menorPreco);
-            }
-        }
+        db.prepare("INSERT INTO historico_precos (produto_id, preco, data_hora) VALUES (?, ?, datetime('now', 'localtime'))").run(p.id, novo);
+        
+        // ... lógica do email
+    } else {
+        // Se falhou (timeout/captcha), pula para a próxima janela de tempo para não travar o server
+        db.prepare(`UPDATE produtos SET proxima_verificacao = ? WHERE id = ?`)
+          .run(dataProxima.toISOString(), p.id);
+        console.log(`⚠️ Falha ao capturar preço de: ${p.nome}. Tentando novamente em ${p.intervalo_minutos}min.`);
     }
 }
+}
+
+app.post('/emailtest', async (req, res) => {
+    console.log(`${process.env.EMAIL_FROM}, ${process.env.EMAIL_TO}`)
+
+    try {
+        await enviarEmail("Produto Teste", 100, 50, "https://exemplo.com", 30);
+        res.json({ message: "Email enviado com sucesso!" });
+    } catch (error) {
+        console.error("Erro ao enviar email:", error);
+        res.status(500).json({ error: "Erro ao enviar email" });
+    }
+});
 
 // Rota para forçar atualização de todos os produtos agora
 app.post('/atualizar', async (req, res) => {
@@ -245,34 +256,92 @@ app.patch('/produtos/intervalo/todos', (req, res) => {
     res.json({ success: true });
 });
 
+
 // ==================== ROTAS ====================
 
 app.get('/produtos', (req, res) => {
-    const lista = db.prepare(`
-        SELECT p.*, (SELECT MIN(preco) FROM historico_precos WHERE produto_id = p.id) as menor_preco
-        FROM produtos p ORDER BY p.id DESC
-    `).all();
-    res.json(lista);
+    try {
+        const lista = db.prepare(`
+            WITH MenorPrecoPorProduto AS (
+                SELECT 
+                    produto_id, 
+                    preco as menor_preco, 
+                    data_hora as data_menor_preco,
+                    ROW_NUMBER() OVER (PARTITION BY produto_id ORDER BY preco ASC, data_hora ASC) as rn
+                FROM historico_precos
+            )
+            SELECT 
+                p.*, 
+                m.menor_preco, 
+                m.data_menor_preco
+            FROM produtos p
+            LEFT JOIN MenorPrecoPorProduto m ON p.id = m.produto_id AND m.rn = 1
+            ORDER BY p.id DESC
+        `).all();
+
+        res.json(lista);
+    } catch (error) {
+        console.error("Erro ao buscar produtos:", error);
+        res.status(500).json({ error: "Erro interno no servidor" });
+    }
 });
 
 app.post('/produtos', async (req, res) => {
     const { nome, url, intervalo_minutos } = req.body;
     if (!nome || !url) return res.status(400).json({ error: 'Dados obrigatórios' });
 
+    // 1. Verifica se já existe antes de gastar processamento com Puppeteer
+    const produtoExistente = db.prepare('SELECT id FROM produtos WHERE url = ?').get(url);
+    if (produtoExistente) {
+        return res.status(400).json({ error: 'Você já cadastrou este link anteriormente.' });
+    }
+
     const nomeDaLoja = extrairLoja(url);
     const preco = await pegarPreco(url);
 
-    // CORREÇÃO 4: Adicionado 'status' e 'intervalo_minutos' no INSERT
-    const info = db.prepare(`
-        INSERT INTO produtos (nome, url, ultimo_preco, loja, intervalo_minutos, status)
-        VALUES (?, ?, ?, ?, ?, 'ativo')
-    `).run(nome, url, preco, nomeDaLoja, intervalo_minutos || 30);
+    try {
+        // 2. Insere o produto
+        const info = db.prepare(`
+            INSERT INTO produtos (nome, url, ultimo_preco, loja, intervalo_minutos, status)
+            VALUES (?, ?, ?, ?, ?, 'ativo')
+        `).run(nome, url, preco, nomeDaLoja, intervalo_minutos || 30);
 
-    if (preco) {
-        db.prepare('INSERT INTO historico_precos (produto_id, preco) VALUES (?, ?)').run(info.lastInsertRowid, preco);
-        console.log(`✅ Produto adicionado: ${nome} por R$ ${preco} (${nomeDaLoja})`);
+        const novoId = info.lastInsertRowid;
+
+        // 3. Insere no histórico apenas se o preço foi capturado com sucesso
+        if (preco !== null) {
+            db.prepare("INSERT INTO historico_precos (produto_id, preco, data_hora) VALUES (?, ?, datetime('now', 'localtime'))").run(novoId, preco);
+            console.log(`✅ Produto adicionado: ${nome} por R$ ${preco} (${nomeDaLoja})`);
+        }
+
+        res.json({ success: true, preco, loja: nomeDaLoja });
+    } catch (error) {
+        console.error("Erro ao salvar produto:", error);
+        res.status(500).json({ error: "Erro ao salvar no banco de dados." });
     }
-    res.json({ success: true, preco, loja: nomeDaLoja });
+});
+
+
+app.put('/produtos/:id', (req, res) => {
+    const { id } = req.params;
+    const { nome, url, intervalo_minutos } = req.body;
+    
+    const nomeDaLoja = extrairLoja(url);
+    const novaProxima = new Date();
+    novaProxima.setMinutes(novaProxima.getMinutes() + parseInt(intervalo_minutos || 30));
+
+    try {
+        db.prepare(`
+            UPDATE produtos 
+            SET nome = ?, url = ?, loja = ?, intervalo_minutos = ?, proxima_verificacao = ? 
+            WHERE id = ?
+        `).run(nome, url, nomeDaLoja, intervalo_minutos, novaProxima.toISOString(), id);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Erro ao atualizar produto:", error);
+        res.status(500).json({ error: "Erro ao atualizar produto" });
+    }
 });
 
 app.patch('/produtos/:id/status', (req, res) => {
@@ -289,4 +358,8 @@ app.delete('/produtos/:id', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server pronto e acessível em todas as interfaces na porta ${PORT}`);
+  console.log(`${process.env.EMAIL_FROM}, ${process.env.EMAIL_TO}`)
+  if (!process.env.RESEND_API_KEY) {
+    console.error("❌ ALERTA: RESEND_API_KEY não foi encontrada nas variáveis de ambiente!");
+  }
 });

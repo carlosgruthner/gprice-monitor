@@ -5,8 +5,8 @@ import axios from "axios";
 import { toast, Toaster } from "react-hot-toast";
 import Link from "next/link";
 import Image from "next/image";
-
-const API = "http://192.168.150.245:4000";
+import { useConfig } from "@/hooks/useConfig";
+import { formatarData } from "@/types/date";
 
 export default function Home() {
   const [produtos, setProdutos] = useState([]);
@@ -17,14 +17,32 @@ export default function Home() {
   const [loadingRefresh, setLoadingRefresh] = useState(false);
   const [intervalo, setIntervalo] = useState(10);
   const [isClient, setIsClient] = useState(false);
+  const { config, loading } = useConfig();
+  const API =
+    config.apiIp && config.apiPort
+      ? `http://${config.apiIp}:${config.apiPort}`
+      : null;
 
   useEffect(() => {
-    setIsClient(true);
-    carregar();
+    setIsClient(true); // Marca que estamos no cliente
   }, []);
 
-  const carregar = () =>
-    axios.get(`${API}/produtos`).then((r) => setProdutos(r.data));
+  useEffect(() => {
+    // Só executa a busca se já estivermos no cliente e a config chegar
+    if (isClient && !loading && config.apiIp && config.apiPort) {
+      carregar();
+    }
+  }, [isClient, loading, config.apiIp, config.apiPort]);
+
+  const carregar = async () => {
+    if (!API) return;
+    try {
+      const r = await axios.get(`${API}/produtos`);
+      setProdutos(r.data);
+    } catch (e) {
+      console.error("Erro ao carregar produtos", e);
+    }
+  };
 
   const mudarIntervaloIndividual = async (
     id: number,
@@ -81,9 +99,7 @@ export default function Home() {
           url,
           intervalo_minutos: intervalo,
         });
-        toast.success(
-          `✅ Adicionado! Preço: R$ ${res.data.preco_encontrado || "—"}`,
-        );
+        toast.success(`✅ Adicionado! Preço: R$ ${res.data.preco || "—"}`);
       }
       cancelarEdicao();
       carregar();
@@ -127,6 +143,15 @@ export default function Home() {
       toast.error("Erro ao atualizar.");
     }
     setLoadingRefresh(false);
+  };
+
+  const testarEmail = async () => {
+    try {
+      await axios.post(`${API}/emailtest`);
+      toast.success("Email enviado!");
+    } catch (e) {
+      toast.error("Erro ao enviar email.");
+    }
   };
 
   return (
@@ -294,6 +319,9 @@ export default function Home() {
                           <div className="text-xs text-zinc-500">
                             Menor: R$ {p.menor_preco?.toFixed(2) || "—"}
                           </div>
+                          <div className="text-xs text-zinc-500">
+                            {formatarData(p.data_menor_preco)}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -381,6 +409,21 @@ export default function Home() {
           </table>
         </div>
       </div>
+      <footer>
+        <div className="max-w-6xl mx-auto mt-10 text-center text-zinc-600 text-sm">
+          <p>
+            API: {config.apiIp}:{config.apiPort}
+          </p>
+        </div>
+        <div className="max-w-6xl mx-auto mt-4 text-center">
+          <button
+            onClick={testarEmail}
+            className="text-sm bg-neutral-800 hover:bg-green-700 text-white py-1 px-1 rounded cursor-pointer transition-all active:scale-95"
+          >
+            Teste Email
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -7,8 +7,12 @@ services:
     ports:
       - "4000:4000"
     volumes:
+      - /etc/localtime:/etc/localtime:ro # Sincroniza o relógio com o Linux hospedeiro
+      - /etc/timezone:/etc/timezone:ro
+      - ./data:/app/data
       - ./backend:/app/data
     environment:
+      - TZ=America/Sao_Paulo  # Define o fuso horário para o Node.js
       - DTABASE_PATH=/app/data/precos.db
       - RESEND_API_KEY=${RESEND_API_KEY}
       - EMAIL_FROM=${EMAIL_FROM}
@@ -24,5 +28,6 @@ services:
     depends_on:
       - backend
     environment:
-      - NEXT_PUBLIC_API_URL={{API_URL}}
+      - EXTERNAL_API_IP=192.168.1.50 # Altere aqui quando mudar de local
+      - EXTERNAL_API_PORT=3001
     restart: always

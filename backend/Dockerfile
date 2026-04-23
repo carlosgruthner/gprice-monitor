@@ -1,31 +1,36 @@
-# ESTÁGIO 1: CONSTRUÇÃO
+# ESTÁGIO 1: Construção das dependências nativas
 FROM node:22-alpine AS builder
 WORKDIR /app
-# Instalamos o que é preciso para compilar o SQLite
+# Instala ferramentas necessárias para compilar o better-sqlite3
 RUN apk add --no-cache build-base python3 make g++
 COPY package*.json ./
-# Instalamos apenas o necessário para rodar, limpando o cache em seguida
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --only=production
 
-# ESTÁGIO 2: EXECUÇÃO
+# ESTÁGIO 2: Execução leve
 FROM node:22-alpine
-# Instalamos o Chromium (é o que mais ocupa espaço, mas é necessário)
+WORKDIR /app
+
+# Instala o Chromium e bibliotecas necessárias para o Puppeteer rodar no Alpine
 RUN apk add --no-cache \
     chromium \
     nss \
     freetype \
     harfbuzz \
     ca-certificates \
-    ttf-freefont
+    ttf-freefont \
+    tzdata
 
-WORKDIR /app
-# Copiamos APENAS os módulos prontos e o código
+# Variáveis de ambiente para o Puppeteer não baixar o Chrome e usar o do sistema
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV TZ=America/Sao_Paulo
+
+# Copia apenas o necessário do estágio anterior
 COPY --from=builder /app/node_modules ./node_modules
 COPY . .
 
-# Variáveis do Puppeteer para usar o Chromium do sistema
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+# Garante que a pasta de dados exista para o SQLite
+RUN mkdir -p /app/data
 
 EXPOSE 4000
 CMD ["node", "index.js"]
