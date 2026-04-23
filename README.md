@@ -52,7 +52,8 @@ cd gprice-monitor
     RESEND_API_KEY="sua_chave_api_aqui"
     EMAIL_FROM="seu_email_de_envio@exemplo.com"
     EMAIL_TO="email_que_receberá_as_notificacoes@exemplo.com"
-    API_URL=http:ipdaapi:4000
+    EXTERNAL_API_IP=localhost
+    EXTERNAL_API_PORT=4000
 
 ## Como executar :
 
@@ -82,8 +83,6 @@ O frontend estará disponível em http://localhost:3000 (ou na porta configurada
 
     Contribuições são muito bem-vindas!
     Sinta-se á vontade para abrir Issues ou Pull Requests.
-
-
 
 
 ```
